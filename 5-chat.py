@@ -2,6 +2,10 @@ import streamlit as st
 import lancedb
 from openai import OpenAI
 from dotenv import load_dotenv
+import fitz  # PyMuPDF
+import os
+from streamlit_pdf_viewer import pdf_viewer
+import tempfile
 
 # Load environment variables
 load_dotenv()
@@ -9,6 +13,8 @@ load_dotenv()
 # Initialize OpenAI client
 client = OpenAI()
 
+# Define PDF directory - update this to where your PDFs are stored
+PDF_DIR = "data/pdfs"
 
 # Initialize LanceDB connection
 @st.cache_resource
@@ -55,7 +61,56 @@ def get_context(query: str, table, num_results: int = 3) -> str:
 
         contexts.append(f"{row['text']}{source}")
 
-    return "\n\n".join(contexts)
+    return "\n\n".join(contexts), results
+
+
+def generate_highlight_annotations(document, excerpts):
+    """Generate highlight annotations for PDF excerpts.
+    
+    Args:
+        document: PyMuPDF document object
+        excerpts: List of text excerpts to highlight
+        
+    Returns:
+        List of annotation dictionaries
+    """
+    annotations = []
+    for page_num, page in enumerate(document):
+        for excerpt in excerpts:
+            for inst in page.search_for(excerpt):
+                annotations.append({
+                    "page": page_num + 1,
+                    "x": inst.x0, "y": inst.y0,
+                    "width": inst.x1 - inst.x0,
+                    "height": inst.y1 - inst.y0,
+                    "color": "red",
+                })
+    return annotations
+
+
+def extract_excerpts(text, max_length=50, overlap=5):
+    """Extract meaningful excerpts from longer text.
+    
+    Args:
+        text: Text to extract excerpts from
+        max_length: Maximum length of each excerpt
+        overlap: Overlap between excerpts
+        
+    Returns:
+        List of text excerpts
+    """
+    words = text.split()
+    excerpts = []
+    
+    if len(words) <= max_length:
+        return [text]
+        
+    for i in range(0, len(words), max_length - overlap):
+        excerpt = ' '.join(words[i:i + max_length])
+        if excerpt:
+            excerpts.append(excerpt)
+            
+    return excerpts
 
 
 def get_chat_response(messages, context: str) -> str:
@@ -91,12 +146,77 @@ def get_chat_response(messages, context: str) -> str:
     return response
 
 
+def display_pdf_with_highlights(filename, page_numbers, excerpts):
+    """Display PDF with highlighted excerpts.
+    
+    Args:
+        filename: PDF filename
+        page_numbers: List of page numbers to show
+        excerpts: List of text excerpts to highlight
+    """
+    pdf_path = os.path.join(PDF_DIR, filename)
+    
+    if not os.path.exists(pdf_path):
+        st.error(f"PDF file not found: {pdf_path}")
+        return
+    
+    # Open the PDF document
+    try:
+        document = fitz.open(pdf_path)
+        
+        # Generate highlight annotations
+        annotations = generate_highlight_annotations(document, excerpts)
+        
+        # Create PDF viewer
+        pdf_tabs = st.tabs([f"Page {p}" for p in page_numbers])
+        
+        for i, page_num in enumerate(page_numbers):
+            with pdf_tabs[i]:
+                # Display PDF page with highlights
+                # Convert page_num to standard Python int to ensure JSON serialization
+                page_num_int = int(page_num)
+                
+                # Only render the current page where the highlight is located
+                pages_to_render = [page_num_int]
+                
+                # Filter annotations for only this page
+                page_annotations = []
+                for a in annotations:
+                    if int(a["page"]) == page_num_int:
+                        # Convert all numeric values to standard Python types
+                        page_annotations.append({
+                            "page": int(a["page"]),
+                            "x": float(a["x"]),
+                            "y": float(a["y"]),
+                            "width": float(a["width"]),
+                            "height": float(a["height"]),
+                            "color": a["color"]
+                        })
+                
+                # Use the correct parameters based on documentation
+                pdf_viewer(
+                    pdf_path, 
+                    width=700,  # Default width from docs
+                    annotations=page_annotations,
+                    scroll_to_page=page_num_int,
+                    render_text=True,
+                    pages_to_render=pages_to_render  # Only render the current page
+                )
+                
+    except Exception as e:
+        st.error(f"Error displaying PDF: {str(e)}")
+
+
 # Initialize Streamlit app
 st.title("📚 Document Q&A")
 
 # Initialize session state for chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+# Initialize session state for PDF display
+if "pdf_info" not in st.session_state:
+    st.session_state.pdf_info = None
 
 # Initialize database connection
 table = init_db()
@@ -117,7 +237,7 @@ if prompt := st.chat_input("Ask a question about the document"):
 
     # Get relevant context
     with st.status("Searching document...", expanded=False) as status:
-        context = get_context(prompt, table)
+        context, results = get_context(prompt, table)
         st.markdown(
             """
             <style>
@@ -146,19 +266,35 @@ if prompt := st.chat_input("Ask a question about the document"):
         )
 
         st.write("Found relevant sections:")
-        for chunk in context.split("\n\n"):
-            # Split into text and metadata parts
-            parts = chunk.split("\n")
-            text = parts[0]
-            metadata = {
-                line.split(": ")[0]: line.split(": ")[1]
-                for line in parts[1:]
-                if ": " in line
-            }
-
-            source = metadata.get("Source", "Unknown source")
-            title = metadata.get("Title", "Untitled section")
-
+        
+        # Store PDF information for each result
+        pdf_info = {}
+        
+        for _, row in results.iterrows():
+            # Extract text and metadata
+            text = row["text"]
+            filename = row["metadata"]["filename"]
+            page_numbers = row["metadata"]["page_numbers"]
+            title = row["metadata"]["title"]
+            
+            # Extract excerpts for highlighting
+            excerpts = extract_excerpts(text)
+            
+            # Add to PDF info for later display
+            if filename.endswith('.pdf'):
+                if filename not in pdf_info:
+                    pdf_info[filename] = {
+                        "page_numbers": set(),
+                        "excerpts": set()
+                    }
+                pdf_info[filename]["page_numbers"].update(page_numbers)
+                pdf_info[filename]["excerpts"].update(excerpts)
+            
+            # Build display information
+            source = f"{filename}"
+            if page_numbers:
+                source += f" - p. {', '.join(str(p) for p in page_numbers)}"
+                
             st.markdown(
                 f"""
                 <div class="search-result">
@@ -171,11 +307,30 @@ if prompt := st.chat_input("Ask a question about the document"):
             """,
                 unsafe_allow_html=True,
             )
+        
+        # Save PDF info to session state
+        st.session_state.pdf_info = pdf_info
 
-    # Display assistant response first
+    # Display assistant response
     with st.chat_message("assistant"):
         # Get model response with streaming
         response = get_chat_response(st.session_state.messages, context)
 
     # Add assistant response to chat history
     st.session_state.messages.append({"role": "assistant", "content": response})
+
+# Display PDFs with highlights
+if st.session_state.pdf_info:
+    st.header("📄 Document Highlights")
+    
+    for filename, info in st.session_state.pdf_info.items():
+        with st.expander(f"View {filename}"):
+            # Convert to standard Python types
+            page_numbers = [int(p) for p in sorted(list(info["page_numbers"]))]
+            excerpts = [str(e) for e in list(info["excerpts"])]
+            
+            display_pdf_with_highlights(
+                filename=filename,
+                page_numbers=page_numbers,
+                excerpts=excerpts
+            )
