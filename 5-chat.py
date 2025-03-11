@@ -1,11 +1,17 @@
 import streamlit as st
+st._config.set_option("runner.moduleExcludedFromWatching", ["torch", "torchvision", "torchaudio"])
+
 import lancedb
 from openai import OpenAI
 from dotenv import load_dotenv
 import fitz  # PyMuPDF
 import os
+import shutil
 from streamlit_pdf_viewer import pdf_viewer
 import tempfile
+from extraction import extract_document
+from chunking import chunk_document
+from embedding import embed_document, Chunks
 
 # Load environment variables
 load_dotenv()
@@ -16,6 +22,16 @@ client = OpenAI()
 # Define PDF directory - update this to where your PDFs are stored
 PDF_DIR = "data/pdfs"
 
+table = None
+
+# Ensure directories exist
+def ensure_directories():
+    """Create necessary directories if they don't exist."""
+    os.makedirs(PDF_DIR, exist_ok=True)
+
+# Make sure directories exist at app startup
+ensure_directories()
+
 # Initialize LanceDB connection
 @st.cache_resource
 def init_db():
@@ -25,8 +41,33 @@ def init_db():
         LanceDB table object
     """
     db = lancedb.connect("data/lancedb")
-    return db.open_table("docling")
+    try:
+        # Try to open the existing table
+        table = db.open_table("docling")
+        return table
+    except Exception:
+        # Create a new table if it doesn't exist
+        db.create_table("docling", schema=Chunks, mode="create")
+        table = db.open_table("docling")
+        return table
 
+def process_document(file_path, file_name):
+    """Run extraction, chunking, and embedding using existing modules.
+    For PDFs, also save a copy in the PDF_DIR if needed.
+    """
+    # Only copy the file if it's not already in the PDF_DIR
+    pdf_dest_path = os.path.join(PDF_DIR, file_name)
+    if file_path != pdf_dest_path and file_name.lower().endswith('.pdf'):
+        shutil.copyfile(file_path, pdf_dest_path)
+        print(f"✅ {file_name} saved to {PDF_DIR}")
+    
+    document = extract_document(file_path)
+    print(f"✅ {file_name} extracted!")
+    chunks = chunk_document(document)
+    print(f"✅ {file_name} chunked!")
+    embed_document(chunks, existing_table=table)
+    print(f"✅ {file_name} embedded!")
+    return f"✅ {file_name} processed and stored successfully."
 
 def get_context(query: str, table, num_results: int = 3) -> str:
     """Search the database for relevant context.
@@ -52,7 +93,7 @@ def get_context(query: str, table, num_results: int = 3) -> str:
         source_parts = []
         if filename:
             source_parts.append(filename)
-        if page_numbers:
+        if page_numbers is not None and len(page_numbers) > 0:
             source_parts.append(f"p. {', '.join(str(p) for p in page_numbers)}")
 
         source = f"\nSource: {' - '.join(source_parts)}"
@@ -210,6 +251,47 @@ def display_pdf_with_highlights(filename, page_numbers, excerpts):
 # Initialize Streamlit app
 st.title("📚 Document Q&A")
 
+# Initialize session state for processed files if it doesn't exist
+if "processed_files" not in st.session_state:
+    st.session_state.processed_files = set()
+
+# Sidebar for file upload
+st.sidebar.header("Upload Documents")
+uploaded_file = st.sidebar.file_uploader("Upload a document", type=["pdf", "docx", "txt"], key="file_upload")
+
+if uploaded_file:
+    # Check if this file has already been processed
+    file_identifier = f"{uploaded_file.name}_{uploaded_file.size}"
+    
+    if file_identifier not in st.session_state.processed_files:
+        # Hide the file from the UI before processing
+        with st.sidebar.status("Processing document..."):
+            # Determine the right target path based on file type
+            if uploaded_file.name.lower().endswith('.pdf'):
+                # For PDFs, save directly to PDF_DIR
+                saved_filepath = os.path.join(PDF_DIR, uploaded_file.name)
+            else:
+                # For other files, save to a general uploads directory
+                uploads_dir = "data/uploads"
+                os.makedirs(uploads_dir, exist_ok=True)
+                saved_filepath = os.path.join(uploads_dir, uploaded_file.name)
+            
+            # Write the file to disk
+            with open(saved_filepath, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+                
+            # Process document using the saved file path
+            status = process_document(saved_filepath, uploaded_file.name)
+            
+            # Add file to processed files
+            st.session_state.processed_files.add(file_identifier)
+            
+            st.sidebar.success(f"{status} (Saved at: {saved_filepath})")
+
+            st.rerun()
+    else:
+        st.sidebar.info(f"'{uploaded_file.name}' has already been processed.")
+
 # Initialize session state for chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -292,7 +374,7 @@ if prompt := st.chat_input("Ask a question about the document"):
             
             # Build display information
             source = f"{filename}"
-            if page_numbers:
+            if page_numbers is not None and len(page_numbers) > 0:
                 source += f" - p. {', '.join(str(p) for p in page_numbers)}"
                 
             st.markdown(
