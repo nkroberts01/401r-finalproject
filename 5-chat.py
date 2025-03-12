@@ -8,7 +8,6 @@ import fitz  # PyMuPDF
 import os
 import shutil
 from streamlit_pdf_viewer import pdf_viewer
-import tempfile
 from extraction import extract_document
 from chunking import chunk_document
 from embedding import embed_document, Chunks
