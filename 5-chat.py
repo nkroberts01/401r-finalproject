@@ -8,7 +8,6 @@ import fitz  # PyMuPDF
 import os
 import shutil
 from streamlit_pdf_viewer import pdf_viewer
-import tempfile
 from extraction import extract_document
 from chunking import chunk_document
 from embedding import embed_document, Chunks
@@ -21,8 +20,6 @@ client = OpenAI()
 
 # Define PDF directory - update this to where your PDFs are stored
 PDF_DIR = "data/pdfs"
-
-table = None
 
 # Ensure directories exist
 def ensure_directories():
@@ -50,6 +47,8 @@ def init_db():
         db.create_table("docling", schema=Chunks, mode="create")
         table = db.open_table("docling")
         return table
+
+table = init_db()
 
 def process_document(file_path, file_name):
     """Run extraction, chunking, and embedding using existing modules.
