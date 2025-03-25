@@ -329,7 +329,8 @@ if prompt := st.chat_input("Ask a question about the document"):
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     # Get relevant context
-    with st.status("Searching document...", expanded=False) as status:
+    st.header("🔍 Search Results: Relevant Sections")
+    with st.status("View Relevant Sections", expanded=False) as status:
         context, results = get_context(prompt, table)
         st.markdown(
             """
