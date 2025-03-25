@@ -1,6 +1,4 @@
 import streamlit as st
-st._config.set_option("runner.moduleExcludedFromWatching", ["torch", "torchvision", "torchaudio"])
-
 import lancedb
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -177,7 +175,7 @@ def get_chat_response(messages, context: str) -> str:
     stream = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages_with_context,
-        temperature=0.7,
+        temperature=st.session_state.temperature,  # Use temperature from session state
         stream=True,
     )
 
@@ -257,6 +255,20 @@ if "processed_files" not in st.session_state:
 # Sidebar for file upload
 st.sidebar.header("Upload Documents")
 uploaded_file = st.sidebar.file_uploader("Upload a document", type=["pdf", "docx", "txt"], key="file_upload")
+
+# Add temperature control slider to sidebar
+st.sidebar.header("Model Settings")
+if "temperature" not in st.session_state:
+    st.session_state.temperature = 0.7  # Default value
+temperature = st.sidebar.slider(
+    "Temperature", 
+    min_value=0.0, 
+    max_value=1.0, 
+    value=st.session_state.temperature, 
+    step=0.1,
+    help="Lower values make responses more deterministic, higher values more creative"
+)
+st.session_state.temperature = temperature
 
 if uploaded_file:
     # Check if this file has already been processed
