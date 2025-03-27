@@ -14,6 +14,7 @@ This pipeline converts various document formats into a unified structure, chunks
 - **Chat Memory**: Build contextual conversations about your documents
 - **Advanced Understanding**: AI-powered layout analysis and table structure recognition
 - **Flexible Output**: Export to HTML, Markdown, JSON, or plain text
+- **PDF Highlighting**: View source documents with relevant sections automatically highlighted
 
 ## How It Works
 
@@ -30,30 +31,51 @@ This pipeline follows a sequential process:
 
 ### Prerequisites
 
-1. Install the required packages:
+1. **Python Environment**: Python 3.8+ recommended
+2. **OpenAI API Key**: Required for embeddings and LLM responses (you'll be prompted to enter this in the interface)
+3. **Dependencies**: Set up your environment using the instructions below
+
+### Environment Setup
 
 ```bash
-pip install -r requirements.txt
+# Create and activate a virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows use: venv\Scripts\activate
+
+# Install dependencies
+pip3 install -r requirements.txt
 ```
 
 ### Running the Pipeline
 
-Execute the scripts in order to build and query the document database:
+The project consists of modular Python files that can be imported directly or used in sequence:
 
-1. **Extract document content**: `python 1-extraction.py`  
+1. **Extract document content**: Uses `extraction.py`  
    Processes input documents using Docling and saves structured content
 
-2. **Create document chunks**: `python 2-chunking.py`  
+2. **Create document chunks**: Uses `chunking.py`  
    Breaks documents into semantically meaningful chunks while preserving context
 
-3. **Create embeddings**: `python 3-embedding.py`  
+3. **Create embeddings**: Uses `embedding.py`  
    Generates vector embeddings for each chunk and stores them in LanceDB
 
-4. **Test search functionality**: `python 4-search.py`  
-   Performs basic semantic search to verify the pipeline
-
-5. **Launch the chat interface**: `streamlit run 5-chat.py`  
+4. **Launch the chat interface**: 
+   ```bash
+   streamlit run chat.py
+   ```
    Start the interactive chat interface at `http://localhost:8501`
+
+### Interactive Streamlit Interface
+
+The Streamlit interface (`chat.py`) provides:
+
+- Document upload functionality for PDFs, DOCX, and TXT files
+- Automatic processing of uploaded documents
+- Conversational interface for querying documents
+- Interactive PDF viewer with automatic highlighting of relevant sections
+- Temperature control for adjusting AI response creativity
+- Source attribution with page numbers and section titles
+- Prompt to enter your OpenAI API key (which will be saved automatically)
 
 ## Document Processing Details
 
@@ -82,6 +104,20 @@ The standard document processing includes:
 5. Content organization and structuring
 6. Export formatting
 
+### Models Used
+
+- **Embedding**: OpenAI's `text-embedding-3-large` for vector embeddings
+- **Chat Completion**: OpenAI's `gpt-4o-mini` for generating responses (configurable)
+- **Tokenizer**: OpenAI's `cl100k_base` for text chunking
+
+## Project Structure
+
+- `extraction.py`: Document extraction functionality
+- `chunking.py`: Text chunking with context preservation
+- `embedding.py`: Vector embedding creation and storage
+- `chat.py`: Streamlit interface for document Q&A
+- `utils/`: Helper utilities including tokenization and sitemap processing
+
 ## Use Cases
 
 - **Enterprise Knowledge Base**: Create a searchable repository of company documents
@@ -92,8 +128,15 @@ The standard document processing includes:
 
 ## Customization
 
-Modify the configuration files to:
-- Adjust chunking parameters for different document types
-- Change embedding models for different performance/cost tradeoffs
-- Customize the chat interface appearance and behavior
+Modify the code to:
+- Adjust chunking parameters for different document types (in `chunking.py`)
+- Change embedding models for different performance/cost tradeoffs (in `embedding.py`)
+- Customize the chat interface appearance and behavior (in `chat.py`)
 - Add additional processing steps to the pipeline
+
+## Troubleshooting
+
+- **Missing API Key**: If the OpenAI API key is missing, you'll be prompted to enter it in the Streamlit interface (no need to create a .env file manually)
+- **PDF Highlighting Issues**: Ensure PyMuPDF is properly installed with `pip install PyMuPDF`
+- **Storage Issues**: Check that the `data/` directory exists and has proper permissions
+- **Large Document Processing**: For very large documents, you may need to adjust the `MAX_TOKENS` constant in `chunking.py`
