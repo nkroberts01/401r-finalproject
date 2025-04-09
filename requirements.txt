@@ -1,11 +1,3 @@
-requests
-ipykernel
-python-dotenv
-openai
-pydantic
-docling
-lancedb
 streamlit
-tiktoken
-streamlit-pdf-viewer
-PyMuPDF
+requests
+python-dotenv
