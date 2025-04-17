@@ -26,13 +26,16 @@ if st.button("Ingest URL"):
     if url_input:
         with st.spinner("Ingesting and indexing the webpage..."):
             try:
-                response = requests.post(API_INGEST_URL, json={"url": url_input})
+                response = requests.post(API_INGEST_URL, json={"urls": [url_input]})
                 data = response.json()
-                if response.status_code == 200 and data.get("success"):
+                # Rely only on the HTTP status code for success
+                if response.status_code == 200: 
                     st.success("✅ URL successfully ingested!")
                     st.session_state.url = url_input
                 else:
-                    st.error(f"Failed to ingest URL: {data}")
+                    # Display the message from the Lambda response if available
+                    error_message = data.get("message", str(data)) 
+                    st.error(f"Failed to ingest URL: {error_message}")
             except Exception as e:
                 st.error(f"Request error: {e}")
     else:
